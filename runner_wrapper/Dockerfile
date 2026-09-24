@@ -1,45 +1,120 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.7
+
+ARG CUDA_VERSION=12.8.1
+ARG UBUNTU_VERSION=24.04
+
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      git \
+      ninja-build \
+      python3 \
+      python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG UV_VERSION=0.12.5
+ARG TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9+PTX"
+ARG MAX_JOBS=8
+ARG PYTORCH3D_COMMIT=978cd99221b9e0a6a568f1d427854d73363265cf
+
+ENV UV_PYTHON_INSTALL_DIR=/opt/python \
+    VIRTUAL_ENV=/opt/runner \
+    PATH=/opt/runner/bin:${PATH} \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    MAX_JOBS=${MAX_JOBS} \
+    UV_LINK_MODE=copy
+
+RUN python3 -m pip install --break-system-packages --no-cache-dir "uv==${UV_VERSION}" && \
+    uv python install 3.11 && \
+    uv venv --python 3.11 ${VIRTUAL_ENV}
+
+WORKDIR /build
+
+COPY --link runner_wrapper/requirements.txt /build/requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install \
+      torch==2.7.1 \
+      torchvision==0.22.1 \
+      --index-url https://download.pytorch.org/whl/cu128 && \
+    uv pip install -r /build/requirements.txt
+
+# Build the repository-pinned DA-2 revision. PyTorch3D was listed in the
+# upstream .gitmodules without a matching gitlink, so pin its source here.
+COPY --link submodules /build/submodules
+RUN test -f /build/submodules/DA-2/src/pyproject.toml
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --no-deps /build/submodules/DA-2/src && \
+    FORCE_CUDA=1 CUDA_HOME=/usr/local/cuda uv pip install \
+      --reinstall --no-cache --no-build-isolation \
+      "git+https://github.com/facebookresearch/pytorch3d.git@${PYTORCH3D_COMMIT}"
+
+COPY --link pyproject.toml README.md /build/model_repo/
+COPY --link src /build/model_repo/src
+RUN uv pip install --no-deps /build/model_repo
+
+# Confirm that the compiled extension covers the supported GPU families and
+# retains PTX for newer GPUs.
+RUN extension_path="$(python -c 'import torch; import pytorch3d._C; print(pytorch3d._C.__file__)')" && \
+    elf_targets="$(cuobjdump --list-elf "${extension_path}")" && \
+    ptx_targets="$(cuobjdump --list-ptx "${extension_path}")" && \
+    printf '%s\n%s\n' "${elf_targets}" "${ptx_targets}" && \
+    for architecture in 75 80 86 89; do \
+      echo "${elf_targets}" | grep -q "sm_${architecture}"; \
+    done && \
+    echo "${ptx_targets}" | grep -q "sm_89"
+
+FROM nvidia/cuda:${CUDA_VERSION}-base-ubuntu${UBUNTU_VERSION} AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      libegl1 \
+      libgl1 \
+      libglib2.0-0 \
+      libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;8.9+PTX"
+
+ENV VIRTUAL_ENV=/opt/runner \
+    PATH=/opt/runner/bin:${PATH} \
+    PYTHONPATH=/app/model_repo/src:/app/model_repo:/app \
+    TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    RUNNER_PORT=58090 \
+    RUNNER_NAME=worldgen-panorama \
+    RUNNER_TYPE=generator \
+    RUNNER_VERSION=0.1.0 \
+    RUNNER_CONTRACT_VERSION=1 \
+    RUNNER_IDLE_TIMEOUT_SECONDS=900 \
+    RUNNER_ADAPTER=runner_wrapper.adapter:run_job \
+    HF_HOME=/data/model_cache/worldgen/huggingface \
+    TORCH_HOME=/data/model_cache/worldgen/torch \
+    XDG_CACHE_HOME=/data/model_cache/worldgen/xdg \
+    HF_HUB_DISABLE_XET=1 \
+    PYTORCH_ALLOC_CONF=expandable_segments:True
+
+COPY --link --from=builder /opt/python /opt/python
+COPY --link --from=builder /opt/runner /opt/runner
 
 WORKDIR /app/model_repo
+COPY --link src /app/model_repo/src
+COPY --link runner_wrapper /app/model_repo/runner_wrapper
 
-# In model repos, build from the repository root:
-# docker build -f runner_wrapper/Dockerfile -t my-runner .
-#
-# In this repo, the test runner can be built from runner_wrapper/:
-# docker build -f runner_wrapper/Dockerfile -t scenegendeploybench-testrunner runner_wrapper
-COPY . /app/model_repo
-
-# If the build context is runner_wrapper/ itself, normalize it
-RUN if [ -f server.py ] && [ -f adapter.py ] && [ ! -f runner_wrapper/server.py ]; then \
-      mkdir /tmp/runner_wrapper; \
-      mv ./* /tmp/runner_wrapper/; \
-      mv /tmp/runner_wrapper runner_wrapper; \
-    fi
-
-ENV PYTHONPATH=/app/model_repo:/app
-
-ARG INSTALL_REQUIREMENTS=1
-RUN if [ "$INSTALL_REQUIREMENTS" = "1" ] && [ -f requirements.txt ]; then \
-      pip install --no-cache-dir -r requirements.txt; \
-    fi
-
-ARG INSTALL_EDITABLE=0
-RUN if [ "$INSTALL_EDITABLE" = "1" ] && { [ -f pyproject.toml ] || [ -f setup.py ]; }; then \
-      pip install --no-cache-dir -e .; \
-    fi
+RUN --network=none python -B -c "from worldgen.pano_depth import build_depth_model; from worldgen.utils.splat_utils import convert_rgbd_to_gs; from runner_wrapper.adapter import run_job; print(build_depth_model.__name__, convert_rgbd_to_gs.__name__, run_job.__name__)"
 
 EXPOSE 58090
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV RUNNER_PORT=58090
-ENV RUNNER_NAME=test-runner
-ENV RUNNER_TYPE=generator
-ENV RUNNER_VERSION=0.1.0
-ENV RUNNER_CONTRACT_VERSION=1
-ENV RUNNER_IDLE_TIMEOUT_SECONDS=900
-ENV RUNNER_ADAPTER=runner_wrapper.adapter:run_job
-ENV TEST_RUNNER_MIN_SECONDS=360
-ENV TEST_RUNNER_MAX_SECONDS=720
 
 CMD ["python", "-m", "runner_wrapper.server"]

@@ -1,82 +1,51 @@
-# Runner Wrapper
+# WorldGen DeployBench runner
 
-`runner_wrapper/` turns a model repository into a SceneGenDeployBench runner image. It provides the HTTP server, job logging, resource measurements, Docker wiring, examples, and local test helper. A model repository normally only needs a model-specific `adapter.py` and runner catalog.
+`worldgen-panorama` is a generator runner for one full 360 by 180 degree equirectangular RGB `image`. It runs WorldGen's DA-2 spherical depth path and returns a Graphdeco-compatible `3dgs` PLY. It does not run FLUX panorama generation, Sharp, background inpainting, or mesh export.
 
-The directory `runner_wrapper/` is self-contained so it can be copied or pulled as a subtree without the main repository.
+The generated scene uses `RDF` coordinates, where positive X points right, positive Y points down, and positive Z points forward. DA-2 normalizes each prediction to a maximum radial distance of 20, so the runner reports relative scene units and an initial `scene_scale` of 1.0. Use the DeployBench `3dgs_scale_calibration` evaluator when metric camera displacement matters.
 
-One runner catalog entry has one role:
+The distributable catalog is [config/runners/worldgen.yaml](config/runners/worldgen.yaml). Its batch size is 10 because the server executes jobs sequentially and each job gets a fresh child process. This amortizes container startup while periodically recycling CUDA and Python state. Two attempts allow one retry for transient downloads, container failures, or GPU failures.
 
-- A generator turns dataset inputs into reusable generated files.
-- An evaluator consumes dataset data and/or files from a generator and reports metrics.
+WorldGen and DA-2 run each inference job on one `torch.device`. DA-2's supplied Accelerate inference configs disable distributed execution and use one process. The runner therefore requests one GPU rather than exposing every host GPU. To pin a deployment to a specific GPU, set `launcher.gpus` to `device=<GPU UUID>` in the deployed catalog. For a local run, set `RUNNER_GPUS=device=<GPU UUID>`.
 
-## Add To A Model Repository
+## Model assets
 
-From the model repository root:
+The runner downloads the public `haodongli/DA-2` checkpoint through Hugging Face on first use. It pins snapshot `0d55ccb5e46b8ed4715fae3a4c04fc897f1689f3` and reports that revision in each job's model metrics. The catalog stores Hugging Face, Torch, and XDG caches below `/data/model_cache/worldgen`. `HF_TOKEN` is optional and passes through from the deployment environment.
 
-```bash
-git remote add deploybench https://github.com/CashewHero/SceneGenDeployBench.git
-git fetch deploybench subtree/runner_wrapper
-git subtree add --prefix=runner_wrapper deploybench subtree/runner_wrapper --squash
-```
-
-Pull later updates with:
+Initialize the repository-pinned DA-2 source before building. The Dockerfile fetches PyTorch3D at its pinned commit because the upstream fork listed it in `.gitmodules` without committing a corresponding gitlink.
 
 ```bash
-git fetch deploybench subtree/runner_wrapper
-git subtree pull --prefix=runner_wrapper deploybench subtree/runner_wrapper --squash
+git submodule update --init submodules/DA-2
 ```
 
-The main files are:
+The Docker build fails with a direct message when the DA-2 submodule is missing.
 
-```text
-runner_wrapper/
-  adapter.py       model-specific job implementation
-  files.py         compatible artifact publication
-  server.py        shared HTTP runner server
-  Dockerfile       runner image build
-  localtest.sh     local build and smoke helper
-  AGENTS.md        detailed adaptation contract
-  examples/        request, catalog, Docker, and workflow templates
-```
+## Build and test
 
-Copy the matching catalog template to `runner_wrapper/config/runners/<runner>.yaml` and edit it for the model. To use the runner locally, copy that catalog into the active DeployBench runner-config directory.
-
-## Build And Test
-
-Build from the model repository root:
+Run contract and adapter tests without a GPU:
 
 ```bash
-docker build -f runner_wrapper/Dockerfile -t my-model-runner .
+runner_wrapper/localtest.sh test
 ```
 
-Or use the helper:
+Build the CUDA image from the repository root:
 
 ```bash
 runner_wrapper/localtest.sh build
-runner_wrapper/localtest.sh smoke
 ```
 
-The bundled test adapter waits by default. For a quick wrapper smoke test:
+The smoke request expects a real 2:1 panorama at `datasets/smoke/image.png` below the selected data root. The standard local DeployBench data root already has this input:
 
 ```bash
-TEST_RUNNER_MIN_SECONDS=0 TEST_RUNNER_MAX_SECONDS=0 \
-  runner_wrapper/localtest.sh smoke
+RUNNER_DATA_DIR=/mnt/sata1/deploybench runner_wrapper/localtest.sh smoke
 ```
 
-## Data Flow
+The first smoke run downloads DA-2. The result contains `3DGS-rgbd-<hash>.ply`, a runner log, and a metrics JSON file under `output/worldgen-panorama@0.1.0/smoke/sample-1`.
 
-The orchestrator supplies the selected dataset data to a runner. An evaluator can also receive generated files and additional dataset viewpoints. Each runner reports reusable outputs or metrics back to the orchestrator.
+## Contract
 
-The wire contract is defined in [Runner API](docs/api.md). Use the wrapper filesystem helpers to publish job files.
+The request must contain exactly one primary sample in `inputs.data`, with an `image` path. Missing projection metadata defaults to `equirectangular`. An explicit projection must be `equirectangular`, an explicit field of view must be `[360, 180]`, and the decoded image must have a 2:1 aspect ratio.
 
-## Publish An Image
+The adapter converts raw alpha to Graphdeco opacity logits, canonicalizes signed pole scales and clamps them to a small positive value, normalizes quaternions, and rejects non-finite output before publication. This makes WorldGen's PLY compatible with the DeployBench 3DGS renderer.
 
-Create the image workflow from the included template:
-
-```bash
-mkdir -p .github/workflows
-cp runner_wrapper/examples/github-workflows/build-runner-image.yaml \
-  .github/workflows/runner-image.yaml
-```
-
-The target repository should be named `SceneGenDeployBench-<model>`. The workflow derives the GHCR image name from the repository name.
+The HTTP and result contract is defined in [docs/api.md](docs/api.md).

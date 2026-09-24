@@ -1,3 +1,9 @@
+# SceneGenDeployBench runner
+
+This fork includes the `worldgen-panorama` generator runner. It accepts one full 2:1 equirectangular `image`, runs WorldGen's direct DA-2 RGB-D reconstruction path, and returns a Graphdeco-compatible `3dgs` PLY. Build, cache, catalog, input, and local test instructions are in [runner_wrapper/README.md](runner_wrapper/README.md).
+
+---
+
 # WorldGen: Generate Any 3D Scene in Seconds 
 <div align="center">
   <img src="./assets/logo.png" alt="logo" width="300" style="margin-bottom: 210px;"/>  
