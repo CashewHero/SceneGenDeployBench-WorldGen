@@ -81,7 +81,7 @@ class RunnerSettings:
             port=int(os.getenv("RUNNER_PORT", "58090")),
             runner_name=os.getenv("RUNNER_NAME", "runner"),
             runner_type=os.getenv("RUNNER_TYPE", "generator"),
-            runner_version=os.getenv("RUNNER_VERSION", "0.1.0"),
+            runner_version=os.getenv("RUNNER_VERSION", "0.1.1"),
             contract_version=int(os.getenv("RUNNER_CONTRACT_VERSION", "1")),
             idle_timeout_seconds=int(os.getenv("RUNNER_IDLE_TIMEOUT_SECONDS", "900")),
             startup_timeout_seconds=float(os.getenv("RUNNER_STARTUP_TIMEOUT_SECONDS", "60")),

@@ -36,11 +36,13 @@ def utc_time(timestamp: float) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(timestamp))
 
 
-def _variant_key(parameters: dict[str, Any]) -> str:
+def _variant_key(parameters: dict[str, Any], splat_mode: str = "rgbd") -> str:
+    if splat_mode not in {"rgbd", "sharp"}:
+        raise ValueError(f"unknown splat mode: {splat_mode}")
     digest = hashlib.sha256(
         json.dumps(parameters, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()[:10]
-    return f"rgbd-{digest}"
+    return f"{splat_mode}-{digest}"
 
 
 def _parameters(raw: object) -> dict[str, Any]:
@@ -154,12 +156,11 @@ def _configure_model_cache() -> Path:
     return cache_root
 
 
-def _generate_splat(image_path: Path) -> Any:
+def _generate_splat(image_path: Path, splat_mode: str = "rgbd") -> Any:
     import torch
     from da2.model.spherevit import SphereViT
     from PIL import Image
     from worldgen.pano_depth import DA2_CONFIG, pred_pano_depth
-    from worldgen.utils.splat_utils import convert_rgbd_to_gs
 
     if not torch.cuda.is_available():
         raise RuntimeError("WorldGen requires an NVIDIA CUDA GPU")
@@ -175,12 +176,22 @@ def _generate_splat(image_path: Path) -> Any:
     depth_model.eval()
     depth_model = depth_model.to(device)
     with Image.open(image_path) as image:
-        predictions = pred_pano_depth(depth_model, image.convert("RGB"))
-    return convert_rgbd_to_gs(
-        predictions["rgb"],
-        predictions["distance"],
-        predictions["rays"],
-    )
+        panorama = image.convert("RGB")
+        predictions = pred_pano_depth(depth_model, panorama)
+        del depth_model
+        if splat_mode == "sharp":
+            from runner_wrapper.sharp_adapter import generate_sharp_splat
+
+            return generate_sharp_splat(panorama, predictions, device)
+    if splat_mode == "rgbd":
+        from worldgen.utils.splat_utils import convert_rgbd_to_gs
+
+        return convert_rgbd_to_gs(
+            predictions["rgb"],
+            predictions["distance"],
+            predictions["rays"],
+        )
+    raise ValueError(f"unknown splat mode: {splat_mode}")
 
 
 def _write_graphdeco_ply(splat: Any, destination: Path) -> int:
@@ -255,7 +266,9 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 
 
-def run_job(job_request: dict[str, Any]) -> dict[str, Any]:
+def _run_job(job_request: dict[str, Any], splat_mode: str) -> dict[str, Any]:
+    if splat_mode not in {"rgbd", "sharp"}:
+        raise ValueError(f"unknown splat mode: {splat_mode}")
     started_at = time.time()
     runtime = job_request.get("runtime")
     if not isinstance(runtime, dict) or not runtime.get("workspace_dir"):
@@ -268,7 +281,7 @@ def run_job(job_request: dict[str, Any]) -> dict[str, Any]:
         else None
     )
     try:
-        variant = _variant_key(_parameters(raw_parameters))
+        variant = _variant_key(_parameters(raw_parameters), splat_mode)
     except (TypeError, ValueError):
         fallback = hashlib.sha256(str(job_request.get("job", {})).encode()).hexdigest()[:10]
         variant = f"invalid-{fallback}"
@@ -298,13 +311,14 @@ def run_job(job_request: dict[str, Any]) -> dict[str, Any]:
                     job_id=job.get("job_id"),
                     primary_sample=primary,
                     resolution=list(resolution),
+                    splat_mode=splat_mode,
                     model_cache=str(cache_root),
                     model_revision=DA2_REVISION,
                 )
             )
 
             stage = "model_inference"
-            splat = _generate_splat(prepared_image)
+            splat = _generate_splat(prepared_image, splat_mode)
             stage = "export"
             output_name = f"3DGS-{variant}.ply"
             gaussian_count = _write_graphdeco_ply(splat, workspace / output_name)
@@ -326,7 +340,38 @@ def run_job(job_request: dict[str, Any]) -> dict[str, Any]:
                     "value": DA2_REVISION,
                     "source": "model",
                 },
+                {
+                    "namespace": "model",
+                    "name": "splat_mode",
+                    "type": "string",
+                    "value": splat_mode,
+                    "source": "model",
+                },
             ]
+            if splat_mode == "sharp":
+                from runner_wrapper.sharp_adapter import (
+                    SHARP_CHECKPOINT_ETAG,
+                    SHARP_SOURCE_REVISION,
+                )
+
+                model_metrics.extend(
+                    [
+                        {
+                            "namespace": "model",
+                            "name": "sharp_checkpoint_etag",
+                            "type": "string",
+                            "value": SHARP_CHECKPOINT_ETAG,
+                            "source": "model",
+                        },
+                        {
+                            "namespace": "model",
+                            "name": "sharp_source_revision",
+                            "type": "string",
+                            "value": SHARP_SOURCE_REVISION,
+                            "source": "model",
+                        },
+                    ]
+                )
             report.update(
                 output_files=output_files,
                 output_metadata=output_metadata,
@@ -379,3 +424,7 @@ def run_job(job_request: dict[str, Any]) -> dict[str, Any]:
         ],
     )
     return result
+
+
+def run_job(job_request: dict[str, Any]) -> dict[str, Any]:
+    return _run_job(job_request, splat_mode="rgbd")

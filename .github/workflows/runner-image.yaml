@@ -47,7 +47,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Initialize runner source dependencies
-        run: git submodule update --init submodules/DA-2
+        run: git submodule update --init submodules/DA-2 submodules/ml-sharp
 
       - name: Set image name
         id: image

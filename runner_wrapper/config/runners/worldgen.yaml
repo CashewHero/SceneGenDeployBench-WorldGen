@@ -2,7 +2,7 @@ catalog_version: 1
 
 runners:
   - runner: worldgen-panorama
-    version: 0.1.0
+    version: 0.1.1
     latest: true
     display_name: WorldGen Panorama
     kind: generator
@@ -23,7 +23,7 @@ runners:
     launcher:
       driver: docker
       compat_version: 1
-      image: ghcr.io/cashewhero/scenegendeploybench-worldgen:0.1.0
+      image: ghcr.io/cashewhero/scenegendeploybench-worldgen:0.1.1
       gpus: 1
       endpoint:
         port: 58090
@@ -34,5 +34,40 @@ runners:
         HF_HUB_DISABLE_XET: "1"
         PYTORCH_ALLOC_CONF: expandable_segments:True
         RUNNER_ADAPTER: runner_wrapper.adapter:run_job
+      env_passthrough:
+        - HF_TOKEN
+
+  - runner: worldgen-panorama-sharp
+    version: 0.1.1
+    latest: true
+    display_name: WorldGen Panorama Sharp
+    kind: generator
+    contract_version: 1
+    inputs:
+      data:
+        required_sample:
+          required_datatype:
+            - image
+    job_parameters: {}
+    scheduling:
+      # Sharp produces about 7.1 million Gaussians per job, so recycle the process batch sooner.
+      max_batch_size: 4
+      max_attempts: 2
+      job_timeout_minutes: 120
+      startup_timeout_minutes: 10
+    launcher:
+      driver: docker
+      compat_version: 1
+      image: ghcr.io/cashewhero/scenegendeploybench-worldgen:0.1.1
+      gpus: 1
+      endpoint:
+        port: 58090
+      env:
+        HF_HOME: /data/model_cache/worldgen/huggingface
+        TORCH_HOME: /data/model_cache/worldgen/torch
+        XDG_CACHE_HOME: /data/model_cache/worldgen/xdg
+        HF_HUB_DISABLE_XET: "1"
+        PYTORCH_ALLOC_CONF: expandable_segments:True
+        RUNNER_ADAPTER: runner_wrapper.sharp_adapter:run_job
       env_passthrough:
         - HF_TOKEN

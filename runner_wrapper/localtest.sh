@@ -17,7 +17,7 @@ HOST_PORT="${RUNNER_HOST_PORT:-58090}"
 DATA_DIR="${RUNNER_DATA_DIR:-${REPO_ROOT}/data}"
 RUNNER_NAME="${RUNNER_NAME:-worldgen-panorama}"
 RUNNER_TYPE="${RUNNER_TYPE:-generator}"
-RUNNER_VERSION="${RUNNER_VERSION:-0.1.0}"
+RUNNER_VERSION="${RUNNER_VERSION:-0.1.1}"
 RUNNER_ADAPTER="${RUNNER_ADAPTER:-runner_wrapper.adapter:run_job}"
 REQUEST_FILE="${RUNNER_REQUEST_FILE:-${SCRIPT_DIR}/examples/${RUNNER_TYPE}_job_request.json}"
 RUNNER_GPUS="${RUNNER_GPUS:-1}"
@@ -69,7 +69,7 @@ prepare_data() {
   mkdir -p \
     "${DATA_DIR}/model_cache" \
     "${DATA_DIR}/pipelines" \
-    "${DATA_DIR}/output/worldgen-panorama@0.1.0/smoke/sample-1"
+    "${DATA_DIR}/output"
 
   if [[ ! -f "${DATA_DIR}/datasets/smoke/image.png" ]]; then
     echo "missing 2:1 panorama: ${DATA_DIR}/datasets/smoke/image.png" >&2

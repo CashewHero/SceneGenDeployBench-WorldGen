@@ -131,6 +131,10 @@ class WorldGenAdapterTests(unittest.TestCase):
                 if metric["name"] == "checkpoint_revision"
             )
             self.assertEqual(checkpoint_revision["value"], DA2_REVISION)
+            splat_mode = next(
+                metric for metric in result["metrics"] if metric["name"] == "splat_mode"
+            )
+            self.assertEqual(splat_mode["value"], "rgbd")
 
     @unittest.skipUnless(np is not None and PlyData is not None, "NumPy and plyfile are not installed")
     def test_graphdeco_export_converts_alpha_and_canonicalizes_scale(self) -> None:

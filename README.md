@@ -1,6 +1,6 @@
 # SceneGenDeployBench runner
 
-This fork includes the `worldgen-panorama` generator runner. It accepts one full 2:1 equirectangular `image`, runs WorldGen's direct DA-2 RGB-D reconstruction path, and returns a Graphdeco-compatible `3dgs` PLY. Build, cache, catalog, input, and local test instructions are in [runner_wrapper/README.md](runner_wrapper/README.md).
+This fork includes `worldgen-panorama` for direct DA-2 RGB-D reconstruction and `worldgen-panorama-sharp` for WorldGen's experimental six-face Sharp reconstruction. Both accept one full 2:1 equirectangular `image` and return a Graphdeco-compatible `3dgs` PLY. Build, cache, catalog, input, and local test instructions are in [runner_wrapper/README.md](runner_wrapper/README.md).
 
 ---
 
@@ -14,7 +14,7 @@ This fork includes the `worldgen-panorama` generator runner. It accepts one full
 
 [![📄 Project Page](https://img.shields.io/badge/📄-Project_Page-orange)](https://worldgen.github.io/)
 [![Hugging Face Model](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-blue?style=flat)](https://huggingface.co/LeoXie/WorldGen)
-![Badge](https://img.shields.io/badge/version-v0.2.0-green)
+![Badge](https://img.shields.io/badge/version-v0.1.1-green)
 [![GitHub Stars](https://img.shields.io/github/stars/ZiYang-xie/WorldGen)](https://github.com/ZiYang-xie/WorldGen/stargazers/)
 
 </div>

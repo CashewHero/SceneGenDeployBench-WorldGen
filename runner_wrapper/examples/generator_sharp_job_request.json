@@ -1,8 +1,8 @@
 {
   "contract_version": 1,
   "job": {
-    "job_id": "smoke-worldgen-panorama-job-1",
-    "batch_id": "smoke-worldgen-panorama-batch-1",
+    "job_id": "smoke-worldgen-panorama-sharp-job-1",
+    "batch_id": "smoke-worldgen-panorama-sharp-batch-1",
     "job_type": "generation",
     "primary_sample": "sample-1",
     "primary_sample_metadata": {
@@ -12,7 +12,7 @@
     },
     "source_job_id": null,
     "attempt": 1,
-    "timeout_seconds": 3600,
+    "timeout_seconds": 7200,
     "parameters": {}
   },
   "inputs": {
@@ -23,6 +23,6 @@
     }
   },
   "runtime": {
-    "output_dir": "/data/output/worldgen-panorama@0.1.1/smoke/sample-1"
+    "output_dir": "/data/output/worldgen-panorama-sharp@0.1.1/smoke/sample-1"
   }
 }

@@ -45,13 +45,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       --index-url https://download.pytorch.org/whl/cu128 && \
     uv pip install -r /build/requirements.txt
 
-# Build the repository-pinned DA-2 revision. PyTorch3D was listed in the
-# upstream .gitmodules without a matching gitlink, so pin its source here.
+# Build the repository-pinned DA-2 and Sharp revisions. PyTorch3D was listed in
+# the upstream .gitmodules without a matching gitlink, so pin its source here.
 COPY --link submodules /build/submodules
-RUN test -f /build/submodules/DA-2/src/pyproject.toml
+RUN test -f /build/submodules/DA-2/src/pyproject.toml && \
+    test -f /build/submodules/ml-sharp/pyproject.toml
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --no-deps /build/submodules/DA-2/src && \
+    uv pip install --no-deps /build/submodules/ml-sharp && \
     FORCE_CUDA=1 CUDA_HOME=/usr/local/cuda uv pip install \
       --reinstall --no-cache --no-build-isolation \
       "git+https://github.com/facebookresearch/pytorch3d.git@${PYTORCH3D_COMMIT}"
@@ -94,12 +96,12 @@ ENV VIRTUAL_ENV=/opt/runner \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     RUNNER_PORT=58090 \
-    RUNNER_NAME=worldgen-panorama \
+    RUNNER_NAME=worldgen-panorama-sharp \
     RUNNER_TYPE=generator \
-    RUNNER_VERSION=0.1.0 \
+    RUNNER_VERSION=0.1.1 \
     RUNNER_CONTRACT_VERSION=1 \
     RUNNER_IDLE_TIMEOUT_SECONDS=900 \
-    RUNNER_ADAPTER=runner_wrapper.adapter:run_job \
+    RUNNER_ADAPTER=runner_wrapper.sharp_adapter:run_job \
     HF_HOME=/data/model_cache/worldgen/huggingface \
     TORCH_HOME=/data/model_cache/worldgen/torch \
     XDG_CACHE_HOME=/data/model_cache/worldgen/xdg \
@@ -113,7 +115,7 @@ WORKDIR /app/model_repo
 COPY --link src /app/model_repo/src
 COPY --link runner_wrapper /app/model_repo/runner_wrapper
 
-RUN --network=none python -B -c "from worldgen.pano_depth import build_depth_model; from worldgen.utils.splat_utils import convert_rgbd_to_gs; from runner_wrapper.adapter import run_job; print(build_depth_model.__name__, convert_rgbd_to_gs.__name__, run_job.__name__)"
+RUN --network=none python -B -c "from worldgen.pano_depth import build_depth_model; from worldgen.pano_sharp import predict_equirectangular; from worldgen.utils.splat_utils import convert_rgbd_to_gs; from runner_wrapper.adapter import run_job as rgbd_job; from runner_wrapper.sharp_adapter import run_job as sharp_job; print(build_depth_model.__name__, predict_equirectangular.__name__, convert_rgbd_to_gs.__name__, rgbd_job.__name__, sharp_job.__name__)"
 
 EXPOSE 58090
 
